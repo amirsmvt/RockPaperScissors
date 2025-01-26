@@ -38,7 +38,7 @@ public class Player : NetworkBehaviour
     {
         base.OnStartClient();
         
-        SetUserName(true);
+        SetUserName();
         if (IsOwner)
             text.gameObject.SetActive(false);
     }
@@ -53,19 +53,8 @@ public class Player : NetworkBehaviour
         }
     }
     [ServerRpc]
-    private void SetUserName(bool isDefault=false)
+    private void SetUserName()
     {
-        if (isDefault)
-        {
-            userName.SetInitialValues($"Player{Random.Range(0, 10)}");
-
-        }
-        else
-        {
-            Debug.LogError("Omdam" + IsServerInitialized);
-            userName.Value = $"Player{Random.Range(0, 10)}";
-
-            Debug.LogError("Sa" + IsOwner);
-        }
+        userName.Value = $"Player{Random.Range(0, 10)}";
     }
 }
