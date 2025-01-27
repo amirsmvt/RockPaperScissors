@@ -48,6 +48,8 @@ public class Player : NetworkBehaviour
         {
             instance = this;
             if (text != null) text.gameObject.SetActive(false);
+            SetUserName();
+
         }
     }
 
@@ -60,15 +62,15 @@ public class Player : NetworkBehaviour
         }
     }
 
-    private void Update()
-    {
-        if (!IsOwner) return;
+    //private void Update()
+    //{
+    //    if (!IsOwner) return;
 
-        if (Input.GetKeyDown(KeyCode.A))
-        {
-            SetUserName();
-        }
-    }
+    //    if (Input.GetKeyDown(KeyCode.A))
+    //    {
+    //        SetUserName();
+    //    }
+    //}
 
     [ServerRpc]
     private void SetUserName()

@@ -5,6 +5,8 @@ using FishNet.Object.Synchronizing;
 using System.Collections;
 using UnityEngine;
 
+public enum RPSChoice { None, Rock, Paper, Scissors }
+
 public class GameManager : NetworkBehaviour
 {
     public static GameManager instance;
@@ -14,18 +16,15 @@ public class GameManager : NetworkBehaviour
 
     [field: AllowMutableSyncTypeAttribute]
     public SyncVar<bool> CanStart = new SyncVar<bool>();
-
     [field: AllowMutableSyncTypeAttribute]
     public SyncVar<bool> DidStart = new SyncVar<bool>();
-
     [field: AllowMutableSyncTypeAttribute]
     public SyncVar<bool> Finished = new SyncVar<bool>();
 
     [field: AllowMutableSyncTypeAttribute]
     public SyncVar<int> roundsPlayed = new SyncVar<int>();
-
     [field: AllowMutableSyncTypeAttribute]
-    public SyncVar<float> currentRoundTime = new SyncVar<float>(15f); 
+    public SyncVar<float> currentRoundTime = new SyncVar<float>(15f);
 
     private Coroutine _timerCoroutine;
 
@@ -36,10 +35,9 @@ public class GameManager : NetworkBehaviour
 
     private void Update()
     {
-
         if (!IsServerInitialized) return;
         CanStart.Value = (_players.Count == 2) && !DidStart.Value;
-        if (!DidStart.Value && CanStart.Value )
+        if (!DidStart.Value && CanStart.Value)
         {
             StartGame();
         }
@@ -49,30 +47,17 @@ public class GameManager : NetworkBehaviour
     public void StartGame()
     {
         DidStart.Value = true;
+        Finished.Value = false;
         RpcShowGame();
         StartNewRound();
     }
-
-    [Server]
-    private void StopGameNow(string finalMessage)
-    {
-        Finished.Value = true;
-
-        if (_timerCoroutine != null)
-            StopCoroutine(_timerCoroutine);
-        RpcGameOverUI(finalMessage);
-    }
-
-
 
     [Server]
     public void StartNewRound()
     {
         foreach (Player p in _players)
             p.currentChoice.Value = RPSChoice.None;
-
         UnlockChoiceButtons();
-
         if (_timerCoroutine != null)
             StopCoroutine(_timerCoroutine);
         _timerCoroutine = StartCoroutine(RoundCountdown());
@@ -82,15 +67,13 @@ public class GameManager : NetworkBehaviour
     public void OnPlayerChose()
     {
         if (_players.Count < 2) return;
-
         var p1Choice = _players[0].currentChoice.Value;
         var p2Choice = _players[1].currentChoice.Value;
         if (p1Choice != RPSChoice.None && p2Choice != RPSChoice.None)
         {
             if (_timerCoroutine != null)
                 StopCoroutine(_timerCoroutine);
-
-            CompareChoices(p1Choice, p2Choice);
+            StartCoroutine(CompareChoices(p1Choice, p2Choice));
         }
     }
 
@@ -108,18 +91,23 @@ public class GameManager : NetworkBehaviour
             if (p.currentChoice.Value == RPSChoice.None)
                 p.currentChoice.Value = GetRandomChoice();
         }
-        CompareChoices(_players[0].currentChoice.Value, _players[1].currentChoice.Value);
+        yield return StartCoroutine(CompareChoices(_players[0].currentChoice.Value, _players[1].currentChoice.Value));
     }
 
     [Server]
-    public void CompareChoices(RPSChoice choice1, RPSChoice choice2)
+    public IEnumerator CompareChoices(RPSChoice choice1, RPSChoice choice2)
     {
         LockChoiceButtons();
+        RpcShowChosenHands(choice1, choice2);
+        yield return new WaitForSecondsRealtime(1f);
+        var p1 = _players[0];
+        var p2 = _players[1];
 
         if (choice1 == choice2)
         {
-            TargetUpdateResults(_players[0].Owner, "Tie!");
-            TargetUpdateResults(_players[1].Owner, "Tie!");
+
+            TargetUpdateResults(_players[0].Owner, "Tie!", false);
+            TargetUpdateResults(_players[1].Owner, "Tie!", false);
         }
         else
         {
@@ -127,51 +115,80 @@ public class GameManager : NetworkBehaviour
                 (choice1 == RPSChoice.Rock && choice2 == RPSChoice.Scissors) ||
                 (choice1 == RPSChoice.Scissors && choice2 == RPSChoice.Paper) ||
                 (choice1 == RPSChoice.Paper && choice2 == RPSChoice.Rock);
-
             if (player1Wins)
             {
                 _players[0].score.Value++;
-                TargetUpdateResults(_players[0].Owner, $"You won with {choice1}!");
-                TargetUpdateResults(_players[1].Owner, $"You lost with {choice2}!");
+                TargetUpdateResults(_players[0].Owner, $"You won with {choice1}!", true);
+                TargetUpdateResults(_players[1].Owner, $"You lost with {choice2}!", false);
             }
             else
             {
                 _players[1].score.Value++;
-                TargetUpdateResults(_players[1].Owner, $"You won with {choice2}!");
-                TargetUpdateResults(_players[0].Owner, $"You lost with {choice1}!");
+                TargetUpdateResults(_players[1].Owner, $"You won with {choice2}!", true);
+                TargetUpdateResults(_players[0].Owner, $"You lost with {choice1}!", false);
             }
         }
-
         roundsPlayed.Value++;
-        CheckVictory();
-        if (DidStart.Value && !Finished.Value)
-            StartNewRound();
+        string scoreboard = $"{p1.userName.Value}: {p1.score.Value}  -  {p2.userName.Value}: {p2.score.Value}";
+
+        yield return new WaitForSecondsRealtime(1f);
+        RpcHideHands(scoreboard);
+        if (!CheckVictory())
+        {
+            if (DidStart.Value && !Finished.Value)
+                StartNewRound();
+        }
     }
 
     [Server]
-    private void CheckVictory()
+    private bool CheckVictory()
     {
-        foreach (Player player in _players)
+        var p1 = _players[0];
+        var p2 = _players[1];
+        if (p1.score.Value >= 5 || p2.score.Value >= 5)
         {
-            if (player.score.Value >= 5)
+            string scoreboard = $"{p1.userName.Value}: {p1.score.Value}  -  {p2.userName.Value}: {p2.score.Value}";
+            if (p1.score.Value > p2.score.Value)
             {
-                TargetShowVictory(player.Owner, "You Win!");
-                var other = _players.Find(p => p != player);
-                if (other != null)
-                    TargetShowVictory(other.Owner, "You Lose!");
-
-
-                break;
+                TargetShowVictory(p1.Owner, $"You Win!\n{scoreboard}");
+                TargetShowVictory(p2.Owner, $"You Lose!\n{scoreboard}");
             }
+            else
+            {
+                TargetShowVictory(p2.Owner, $"You Win!\n{scoreboard}");
+                TargetShowVictory(p1.Owner, $"You Lose!\n{scoreboard}");
+            }
+            StopGameNow("Game Over!");
+            return true;
         }
+        return false;
     }
 
-    #region RPC METHODS
+    [Server]
+    private void StopGameNow(string finalMessage)
+    {
+        Finished.Value = true;
+        if (_timerCoroutine != null)
+            StopCoroutine(_timerCoroutine);
+        RpcGameOverUI(finalMessage);
+    }
 
     [ObserversRpc]
     private void RpcShowGame()
     {
         ViewManager.Instance.ShowGame();
+    }
+
+    [ObserversRpc]
+    private void RpcHideHands(string res)
+    {
+        UIManager.Instance.HideHands(res);
+    }
+
+    [ObserversRpc]
+    private void RpcShowChosenHands(RPSChoice p1Choice, RPSChoice p2Choice)
+    {
+        UIManager.Instance.ShowHands(p1Choice, p2Choice);
     }
 
     [ObserversRpc]
@@ -185,16 +202,25 @@ public class GameManager : NetworkBehaviour
     {
         UIManager.Instance.DisableChoiceButtons();
     }
+
+    [ObserversRpc]
+    private void UnlockChoiceButtons()
+    {
+        UIManager.Instance.EnableChoiceButtons();
+    }
+
     [ObserversRpc]
     private void RpcGameOverUI(string message)
     {
         UIManager.Instance.DisableChoiceButtons();
         UIManager.Instance.UpdateRoundResult(message);
     }
-    [ObserversRpc]
-    private void UnlockChoiceButtons()
+
+    [TargetRpc]
+    private void TargetUpdateResults(NetworkConnection conn, string resultText, bool isWinner)
     {
-        UIManager.Instance.EnableChoiceButtons();
+        UIManager.Instance.UpdateRoundResult(resultText, isWinner);
+
     }
 
     [TargetRpc]
@@ -209,12 +235,8 @@ public class GameManager : NetworkBehaviour
         UIManager.Instance.ShowVictoryScreen(message);
     }
 
-    #endregion
-
     private RPSChoice GetRandomChoice()
     {
         return (RPSChoice)Random.Range(1, 4);
     }
 }
-
-public enum RPSChoice { None, Rock, Paper, Scissors }
